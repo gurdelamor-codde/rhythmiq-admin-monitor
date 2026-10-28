@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+env/
+*.db
+*.db-shm
+*.db-wal
+*.joblib
+models/
+node_modules/
+dist/
+.DS_Store
+.vscode/
+.idea/
