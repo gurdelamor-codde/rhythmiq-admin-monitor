@@ -20,6 +20,7 @@ class TrackerJob:
     platform: str
     status: str = "pending"
     state: str = "unknown"
+    jid: Optional[str] = None
     rtt_ms: Optional[float] = None
     median_ms: float = 0.0
     threshold_ms: float = 0.0
@@ -60,12 +61,7 @@ class TrackerSocketClient:
             if phone:
                 fut = self._verification_futures.pop(str(phone), None)
                 if fut and not fut.done():
-                    fut.set_result({
-                        "verified": True,
-                        "jid": jid,
-                        "number": phone,
-                        "platform": payload.get("platform", "whatsapp"),
-                    })
+                    fut.set_result({"verified": True, "jid": jid, "number": phone, "platform": payload.get("platform", "whatsapp")})
 
         @self._sio.on("error")
         async def _handle_error(data):
@@ -122,6 +118,9 @@ class TrackerSocketClient:
     def enabled(self) -> bool:
         return bool(settings.tracker_service_enabled)
 
+    def connected(self) -> bool:
+        return self._connected
+
     async def verify_phone(self, phone_number: str, platform: str = "whatsapp") -> Dict[str, Any]:
         if not self.enabled():
             return {"verified": False, "message": "External tracker service is disabled."}
@@ -130,12 +129,13 @@ class TrackerSocketClient:
         if not self._connected:
             return {"verified": False, "message": "External tracker service is unavailable."}
 
-        fut = asyncio.get_running_loop().create_future()
+        loop = asyncio.get_running_loop()
+        fut = loop.create_future()
         key = str(phone_number).strip()
         self._verification_futures[key] = fut
         try:
             await self._sio.emit("add-contact", {"number": phone_number, "platform": platform})
-            return await asyncio.wait_for(fut, timeout=20)
+            return await asyncio.wait_for(fut, timeout=settings.tracker_service_timeout_seconds)
         except asyncio.TimeoutError:
             return {"verified": False, "message": "Phone verification timed out."}
 
@@ -159,11 +159,13 @@ class TrackerSocketClient:
                 job.state = "unknown"
             return job
 
+        jid = str(result.get("jid") or phone)
         with self._lock:
+            job.jid = jid
             job.status = "tracking"
             job.state = "online"
             job.last_seen_at = datetime.now(timezone.utc)
-            self._jid_to_job[str(result.get("jid") or phone)] = job.id
+            self._jid_to_job[jid] = job.id
 
         return job
 
@@ -173,9 +175,10 @@ class TrackerSocketClient:
             if job is None:
                 return None
 
+        target_jid = job.jid or job.phone_number
         if self._connected:
             try:
-                await self._sio.emit("remove-contact", job.phone_number)
+                await self._sio.emit("remove-contact", target_jid)
             except Exception as exc:  # pragma: no cover
                 logger.warning("Could not stop tracker for contact %s: %s", contact_id, exc)
 
@@ -188,6 +191,14 @@ class TrackerSocketClient:
                     self._jid_to_job.pop(jid, None)
         return job
 
+    def service_status(self) -> Dict[str, Any]:
+        return {
+            "enabled": self.enabled(),
+            "connected": self._connected,
+            "url": settings.tracker_service_url,
+            "jobs": len(self._jobs),
+        }
+
     def list_jobs(self) -> Dict[str, Dict[str, Any]]:
         with self._lock:
             payload = {}
@@ -198,6 +209,7 @@ class TrackerSocketClient:
                     "platform": job.platform,
                     "status": job.status,
                     "state": job.state,
+                    "jid": job.jid,
                     "rtt_ms": job.rtt_ms,
                     "median_ms": job.median_ms,
                     "threshold_ms": job.threshold_ms,
@@ -217,6 +229,7 @@ class TrackerSocketClient:
                 "platform": job.platform,
                 "status": job.status,
                 "state": job.state,
+                "jid": job.jid,
                 "rtt_ms": job.rtt_ms,
                 "median_ms": job.median_ms,
                 "threshold_ms": job.threshold_ms,
