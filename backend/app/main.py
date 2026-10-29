@@ -2,14 +2,37 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 
-from app.db import engine
-from app.models import Base
+from app.auth import hash_password
+from app.db import SessionLocal, engine
+from app.models import Base, User
 from app.routers import auth, contacts, events, insights, leaderboard
 from app.routers.tracker import router as tracker_router
 from app.services.device_tracker_service import tracker_socket_client
 
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_default_admin_user() -> None:
+    db: Session = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == "admin@rhythmiq.io").first()
+        if user is None:
+            db.add(
+                User(
+                    id="admin-default",
+                    email="admin@rhythmiq.io",
+                    name="Admin",
+                    password_hash=hash_password("admin123"),
+                    role="admin",
+                    timezone="UTC",
+                )
+            )
+            db.commit()
+    finally:
+        db.close()
+
 
 app = FastAPI(title="RhythmIQ Admin Monitor", version="1.0.0")
 
@@ -24,6 +47,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
+    ensure_default_admin_user()
     if tracker_socket_client.enabled():
         await tracker_socket_client.start()
 
