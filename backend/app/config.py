@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 1440
     model_storage_dir: str = os.path.join(BASE_DIR, "models")
 
-    tracker_service_enabled: bool = True
+    tracker_service_enabled: bool = False
     tracker_service_url: str = "http://localhost:3001"
     tracker_service_timeout_seconds: int = 20
     tracker_service_platforms: str = "whatsapp,signal"
